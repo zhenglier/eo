@@ -57,8 +57,7 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
     const std::unordered_map<int,int>& indeg0,
     const std::unordered_map<int,std::vector<int>>& adj,
     const std::unordered_map<int, const Node*>& id2node,
-    int card_num,
-    std::mt19937& rng)
+    int card_num)
 {
     if (card_num <= 0) return {};
     // 计算最大 id 以便开数组（输入文件保证 id 连续递增）
@@ -81,10 +80,9 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
     order.reserve(indeg.size());
 
     while (!ready.empty()) {
-        // 采用 epsilon-greedy + top-k 随机化选择，降低陷入局部最优的概率
-        const double epsilon = 0.2; // 20% 概率在前 k 个候选中随机挑选
-        std::vector<std::tuple<long long,int,int>> candidates; // (end, nid, card)
-        candidates.reserve(ready.size() * std::max(1, card_num));
+        int best_nid = ready[0];
+        int best_card = 0;
+        long long best_end = std::numeric_limits<long long>::max();
 
         for (int nid : ready) {
             auto itN = id2node.find(nid);
@@ -121,27 +119,13 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
                 }
                 long long ready_at = std::max(start, std::max(local_max, inbound_avail));
                 long long end = ready_at + node->exec_time();
-                candidates.emplace_back(end, nid, c);
+                if (end < best_end || (end == best_end && (nid < best_nid || (nid == best_nid && c < best_card)))) {
+                    best_end = end;
+                    best_nid = nid;
+                    best_card = c;
+                }
             }
         }
-
-        if (candidates.empty()) return {};
-        std::sort(candidates.begin(), candidates.end(),
-                  [](const std::tuple<long long,int,int>& a, const std::tuple<long long,int,int>& b){
-                      if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
-                      if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
-                      return std::get<2>(a) < std::get<2>(b);
-                  });
-        int topk = std::min(static_cast<int>(candidates.size()), 3);
-        std::uniform_real_distribution<double> prob(0.0, 1.0);
-        int pick_idx = 0;
-        if (topk > 1 && prob(rng) < epsilon) {
-            std::uniform_int_distribution<int> pick(0, topk - 1);
-            pick_idx = pick(rng);
-        }
-        int best_nid = std::get<1>(candidates[pick_idx]);
-        int best_card = std::get<2>(candidates[pick_idx]);
-        long long best_end = std::get<0>(candidates[pick_idx]);
 
         // 提交 best_nid 在 best_card 的调度
         const Node* node = id2node.at(best_nid);
@@ -193,8 +177,8 @@ std::vector<std::vector<std::pair<int,int>>> InitializePopulation(
     std::vector<std::vector<std::pair<int,int>>> population;
     population.reserve(pop_size);
 
-    // 先加入一个随机化贪心解，作为种群的强种子
-    auto greedy = BuildGreedyIndividual(indeg0, adj, id2node, card_num, rng);
+    // 先加入一个贪心解，作为种群的强种子
+    auto greedy = BuildGreedyIndividual(indeg0, adj, id2node, card_num);
     if (!greedy.empty()) population.push_back(std::move(greedy));
 
     // 其余用启发式 + 随机噪声生成
