@@ -47,8 +47,9 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         (cfg.seed >= 0) ? cfg.seed : std::chrono::high_resolution_clock::now().time_since_epoch().count()));
 
     // 时间预算：50,000 点 ≈ 1 分钟，按点数线性缩放
+    // 从进入 ExecuteOrder 开始计时；达到目标时间（按 50000 节点≈60秒）则早停，单位毫秒
     auto t_start = std::chrono::high_resolution_clock::now();
-    double time_budget_seconds = 60.0 * (static_cast<double>(node_ids.size()) / 50000.0);
+    long long time_budget_ms = static_cast<long long>(60000.0 * (static_cast<double>(node_ids.size()) / 50000.0));
 
     // 拓扑排序与卡分配改为调用独立实现
 
@@ -149,9 +150,9 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
 
     // 进化（仅按时间终止）
     while (true) {
-        double elapsed_sec = std::chrono::duration<double>(
+        long long elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - t_start).count();
-        if (elapsed_sec >= time_budget_seconds) break;
+        if (elapsed_ms >= time_budget_ms) break;
         // 如果已满足目标阈值，提前结束
         if (best_fit <= required_time) break;
         // 子代集合（复用缓冲）

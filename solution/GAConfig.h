@@ -4,10 +4,10 @@
 #include <string>
 
 struct GAConfig {
-    int pop_size = 40;
+    int pop_size = 5;
     int generations = 120;
-    double mutation_rate = 0.25;
-    int tournament_k = 3;
+    double mutation_rate = 0.5;
+    int tournament_k = 2;
     int seed = -1; // <0 表示使用时间种子
 };
 
