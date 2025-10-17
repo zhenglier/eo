@@ -59,7 +59,8 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
     const std::unordered_map<int,std::vector<int>>& adj,
     const std::unordered_map<int, const Node*>& id2node,
     int card_num,
-    std::mt19937& rng)
+    std::mt19937& rng,
+    bool randomized)
 {
     if (card_num <= 0) return {};
     // 计算最大 id 以便开数组（输入文件保证 id 连续递增）
@@ -128,18 +129,22 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
                 }
                 long long ready_at = std::max(start, std::max(local_max, inbound_avail));
                 long long end = ready_at + node->exec_time();
-                long long noisy_end = end + static_cast<long long>(noise_frac * end * jitter(rng));
-                candidates.emplace_back(noisy_end, nid, c);
+                long long score = randomized ? (end + static_cast<long long>(noise_frac * end * jitter(rng))) : end;
+                candidates.emplace_back(score, nid, c);
                 // 直接更新最优候选的逻辑已移除，改为在外层使用候选集排序 + epsilon 随机选择
             }
         }
         
         // 根据候选的带噪完成时间进行 epsilon-贪心选择
-        std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b){ return std::get<0>(a) < std::get<0>(b); });
-        int k = std::min(3, static_cast<int>(candidates.size()));
+        std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b){
+            if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
+            if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
+            return std::get<2>(a) < std::get<2>(b);
+        });
+        int k = randomized ? std::min(3, static_cast<int>(candidates.size())) : 1;
         if (!candidates.empty()) {
             int pick_index = 0;
-            if (prob(rng) < epsilon && k > 0) {
+            if (randomized && prob(rng) < epsilon && k > 0) {
                 std::uniform_int_distribution<int> pick(0, k - 1);
                 pick_index = pick(rng);
             } else {
@@ -201,7 +206,7 @@ std::vector<std::vector<std::pair<int,int>>> InitializePopulation(
     population.reserve(pop_size);
 
     // 先加入一个贪心解，作为种群的强种子
-    auto greedy = BuildGreedyIndividual(indeg0, adj, id2node, card_num, rng);
+    auto greedy = BuildGreedyIndividual(indeg0, adj, id2node, card_num, rng, false);
     if (!greedy.empty()) population.push_back(std::move(greedy));
 
     // 其余用启发式 + 随机噪声生成
