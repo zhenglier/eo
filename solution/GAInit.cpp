@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <tuple>
 #include <queue>
+#include <unordered_set>
+#include <numeric>
 
 std::vector<std::pair<int,int>> TopoByPriority(
         const std::unordered_map<int,int>& indeg0,
@@ -282,8 +284,15 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
         int best_card = 0;
         long long best_end = std::numeric_limits<long long>::max();
         const double epsilon = 0.2; // 20% 概率在前 k 个候选中随机挑选
-        std::vector<std::tuple<long long,int,int>> candidates; // (end, nid, card)
-        candidates.reserve(ready.size() * std::max(1, card_num));
+        // 改为维护小顶 top-k 候选，避免构建与排序大向量
+        struct Cand { long long score; int nid; int card; };
+        auto better = [](const Cand& a, const Cand& b){
+            if (a.score != b.score) return a.score < b.score;
+            if (a.nid != b.nid) return a.nid < b.nid;
+            return a.card < b.card;
+        };
+        int k = randomized ? 3 : 1;
+        std::vector<Cand> topcands; topcands.reserve(k);
         // 对完成时间加入与原值相关的相对随机扰动，增强探索
         std::uniform_real_distribution<double> jitter(0.0, 1.0);
         std::uniform_real_distribution<double> prob(0.0, 1.0);
@@ -315,7 +324,7 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
                 }
                 if (!cross.empty()) {
                     std::sort(cross.begin(), cross.end(),
-                              [](const auto& x, const auto& y){ return x.first < y.first; });
+                        [](const auto& x, const auto& y){ return x.first < y.first; });
                     long long tmp_inbound = inbound_avail;
                     for (const auto& rec : cross) {
                         tmp_inbound = std::max(tmp_inbound, rec.first) + rec.second;
@@ -325,29 +334,28 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
                 long long ready_at = std::max(start, std::max(local_max, inbound_avail));
                 long long end = ready_at + node->exec_time();
                 long long score = randomized ? (end + static_cast<long long>(noise_frac * end * jitter(rng))) : end;
-                candidates.emplace_back(score, nid, c);
-                // 直接更新最优候选的逻辑已移除，改为在外层使用候选集排序 + epsilon 随机选择
+                Cand cand{score, nid, c};
+                // 维护 top-k
+                if (static_cast<int>(topcands.size()) < k) {
+                    auto pos = std::lower_bound(topcands.begin(), topcands.end(), cand, better);
+                    topcands.insert(pos, cand);
+                } else if (better(cand, topcands.back())) {
+                    auto pos = std::lower_bound(topcands.begin(), topcands.end(), cand, better);
+                    topcands.insert(pos, cand);
+                    topcands.pop_back();
+                }
             }
         }
-
-        // 根据候选的带噪完成时间进行 epsilon-贪心选择
-        std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b){
-            if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
-            if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
-            return std::get<2>(a) < std::get<2>(b);
-        });
-        int k = randomized ? std::min(3, static_cast<int>(candidates.size())) : 1;
-        if (!candidates.empty()) {
+        // 根据 top-k 候选进行 epsilon-贪心选择
+        if (!topcands.empty()) {
             int pick_index = 0;
-            if (randomized && prob(rng) < epsilon && k > 0) {
-                std::uniform_int_distribution<int> pick(0, k - 1);
+            if (randomized && prob(rng) < epsilon) {
+                std::uniform_int_distribution<int> pick(0, static_cast<int>(topcands.size()) - 1);
                 pick_index = pick(rng);
-            } else {
-                pick_index = 0;
             }
-            best_end = std::get<0>(candidates[pick_index]);
-            best_nid = std::get<1>(candidates[pick_index]);
-            best_card = std::get<2>(candidates[pick_index]);
+            best_end = topcands[pick_index].score;
+            best_nid = topcands[pick_index].nid;
+            best_card = topcands[pick_index].card;
         }
 
         // 提交 best_nid 在 best_card 的调度
@@ -430,7 +438,7 @@ std::vector<std::vector<std::pair<int,int>>> InitializePopulation(
         if (!heft_indiv.empty()) population.push_back(std::move(heft_indiv));
     }
 
-    // 其余用启发式 + 随机噪声生成，卡分配用 EFT
+    // 其余用启发式 + 随机噪声生成，卡分配改用非EFT（更快），再小比例精修
     std::uniform_real_distribution<double> noise(0.0, 0.1);
     for (int i = static_cast<int>(population.size()); i < pop_size; ++i) {
         std::unordered_map<int,double> prio;
@@ -445,9 +453,131 @@ std::vector<std::vector<std::pair<int,int>>> InitializePopulation(
                 prio[nid] = noise(rng);
             }
         }
-        auto indiv = TopoByPriorityWithEFT(indeg0, adj, id2node, card_num, rng, prio, nullptr);
+        auto indiv = TopoByPriority(indeg0, adj, card_num, rng, prio, nullptr);
         if (indiv.empty()) return {}; // 有环，无法调度
+        indiv = RefineCardsByEFT(indiv, id2node, card_num, 0.3, rng); // 只对部分节点做 EFT 精修
         population.push_back(std::move(indiv));
     }
     return population;
+}
+
+std::vector<std::pair<int,int>> RefineCardsByEFT(
+    const std::vector<std::pair<int,int>>& order,
+    const std::unordered_map<int, const Node*>& id2node,
+    int card_num,
+    double refine_ratio,
+    std::mt19937& rng) {
+    if (order.empty() || card_num <= 1 || refine_ratio <= 0.0) return order;
+    std::vector<std::pair<int,int>> result = order;
+    int n = static_cast<int>(order.size());
+    int refine_count = std::max(1, static_cast<int>(n * refine_ratio));
+
+    // 记录每张卡的ready时间、每个节点的完成时间和数据所在卡
+    int max_id = 0;
+    for (auto& p : order) max_id = std::max(max_id, p.first);
+    std::vector<long long> card_ready(card_num, 0);
+    std::vector<long long> inbound_ready(card_num, 0);
+    std::vector<long long> finish_time(max_id + 1, -1);
+    std::vector<int> data_card(max_id + 1, -1);
+
+    // 随机选择需要重分配卡的索引
+    std::vector<int> indices(n);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::shuffle(indices.begin(), indices.end(), rng);
+    indices.resize(refine_count);
+    std::unordered_set<int> to_refine(indices.begin(), indices.end());
+
+    for (int i = 0; i < n; ++i) {
+        int nid = order[i].first;
+        int ori_card = order[i].second;
+        auto itN = id2node.find(nid);
+        if (itN == id2node.end() || !(itN->second)) continue;
+        const Node* node = itN->second;
+        int chosen_card = ori_card;
+        long long best_end = std::numeric_limits<long long>::max();
+
+        // 计算在当前时刻，各卡的准备时间（含串行通信）
+        long long local_max = 0;
+        std::vector<std::pair<long long,long long>> cross; // (finish, transfer)
+        for (const Node* pred : node->inputs()) {
+            if (!pred) continue;
+            int pid = pred->id();
+            long long ft = (pid >= 0 && pid <= max_id) ? finish_time[pid] : -1;
+            if (ft < 0) { local_max = std::numeric_limits<long long>::max()/4; cross.clear(); break; }
+            if (data_card[pid] >= 0 && data_card[pid] < card_num) {
+                if (data_card[pid] == ori_card) {
+                    local_max = std::max(local_max, ft);
+                } else {
+                    cross.emplace_back(ft, pred->transfer_time());
+                }
+            }
+        }
+        if (local_max >= std::numeric_limits<long long>::max()/8) {
+            // 输入未就绪，跳过（理论上不会发生）
+            chosen_card = ori_card;
+        } else if (to_refine.count(i)) {
+            // 在前k卡上评估 EFT（这里k=所有卡，但仅对标记为重分配的节点做）
+            for (int c = 0; c < card_num; ++c) {
+                long long inbound_avail = inbound_ready[c];
+                if (!cross.empty()) {
+                    std::sort(cross.begin(), cross.end(), [](const auto& x, const auto& y){return x.first < y.first;});
+                    long long tmp = inbound_avail;
+                    for (const auto& rec : cross) tmp = std::max(tmp, rec.first) + rec.second;
+                    inbound_avail = tmp;
+                }
+                long long ready_at = std::max(card_ready[c], std::max(local_max, inbound_avail));
+                long long end = ready_at + node->exec_time();
+                if (end < best_end) { best_end = end; chosen_card = c; }
+            }
+        } else {
+            // 保持原卡以避免计算开销
+            long long inbound_avail = inbound_ready[ori_card];
+            if (!cross.empty()) {
+                std::sort(cross.begin(), cross.end(), [](const auto& x, const auto& y){return x.first < y.first;});
+                long long tmp = inbound_avail;
+                for (const auto& rec : cross) tmp = std::max(tmp, rec.first) + rec.second;
+                inbound_avail = tmp;
+            }
+            long long ready_at = std::max(card_ready[ori_card], std::max(local_max, inbound_avail));
+            best_end = ready_at + node->exec_time();
+            chosen_card = ori_card;
+        }
+
+        // 提交该节点到 chosen_card
+        long long inbound_avail2 = inbound_ready[chosen_card];
+        if (chosen_card != ori_card) {
+            // 若改变卡，重算跨卡通信排队
+            std::vector<std::pair<long long,long long>> cross2;
+            for (const Node* pred : node->inputs()) {
+                if (!pred) continue;
+                int pid = pred->id();
+                long long ft = (pid >= 0 && pid <= max_id) ? finish_time[pid] : -1;
+                if (ft >= 0 && data_card[pid] != chosen_card && data_card[pid] >= 0) {
+                    cross2.emplace_back(ft, pred->transfer_time());
+                }
+            }
+            if (!cross2.empty()) {
+                std::sort(cross2.begin(), cross2.end(), [](const auto& x, const auto& y){return x.first < y.first;});
+                long long tmp = inbound_avail2;
+                for (const auto& rec : cross2) tmp = std::max(tmp, rec.first) + rec.second;
+                inbound_avail2 = tmp;
+            }
+        } else {
+            // 原卡：沿用之前 inbound 评估
+            if (!cross.empty()) {
+                std::sort(cross.begin(), cross.end(), [](const auto& x, const auto& y){return x.first < y.first;});
+                long long tmp = inbound_avail2;
+                for (const auto& rec : cross) tmp = std::max(tmp, rec.first) + rec.second;
+                inbound_avail2 = tmp;
+            }
+        }
+        long long ready_at2 = std::max(card_ready[chosen_card], std::max(local_max, inbound_avail2));
+        long long end2 = ready_at2 + node->exec_time();
+        result[i].second = chosen_card;
+        card_ready[chosen_card] = end2;
+        inbound_ready[chosen_card] = inbound_avail2; // 该卡的入站窗口推进到最新
+        finish_time[nid] = end2;
+        data_card[nid] = chosen_card;
+    }
+    return result;
 }

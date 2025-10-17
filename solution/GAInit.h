@@ -26,6 +26,14 @@ std::vector<std::pair<int,int>> TopoByPriorityWithEFT(
     const std::unordered_map<int,double>& priority,
     const std::unordered_map<int,int>* inherit_cards);
 
+// 已有拓扑顺序的卡分配局部优化（按比例重选卡，EFT）
+std::vector<std::pair<int,int>> RefineCardsByEFT(
+    const std::vector<std::pair<int,int>>& order,
+    const std::unordered_map<int, const Node*>& id2node,
+    int card_num,
+    double refine_ratio,
+    std::mt19937& rng);
+
 // 初始种群生成：随机优先级 + 拓扑排序 + 随机卡分配
 std::vector<std::vector<std::pair<int,int>>> InitializePopulation(
     const std::vector<int>& node_ids,

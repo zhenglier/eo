@@ -107,7 +107,8 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
     };
 
     auto crossover = [&](const std::vector<std::pair<int,int>>& A,
-                         const std::vector<std::pair<int,int>>& B) {
+                        const std::vector<std::pair<int,int>>& B) -> std::vector<std::pair<int,int>> {
+        if (A.empty() || B.empty() || A.size() != B.size()) return {};
         // 基于位置平均的优先级，然后依优先级做拓扑排序；卡继承自对应父代（随机选）
         std::unordered_map<int, double> prio;
         for (size_t i = 0; i < A.size(); ++i) prio[A[i].first] += static_cast<double>(i);
@@ -122,7 +123,10 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             int chosen = (coin(rng) == 0) ? inherit_cards[nid] : B[i].second;
             inherit_cards[nid] = chosen;
         }
-        return TopoByPriorityWithEFT(indeg0, adj, id2node, card_num, rng, prio, &inherit_cards);
+        auto child = TopoByPriorityWithEFT(indeg0, adj, id2node, card_num, rng, prio, &inherit_cards);
+        // 对子代进行小比例 EFT 卡局部优化，进一步降低时长但控制耗时
+        child = RefineCardsByEFT(child, id2node, card_num, 0.2, rng);
+        return child;
     };
 
     auto mutate = [&](std::vector<std::pair<int,int>>& indiv) -> bool {
@@ -137,9 +141,8 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             std::unordered_map<int,int> inherit_cards;
             for (const auto& p : indiv) inherit_cards[p.first] = p.second;
             indiv = TopoByPriorityWithEFT(indeg0, adj, id2node, card_num, rng, prio, &inherit_cards);
-            // 随机挑选若干节点重新分配卡
-            std::uniform_int_distribution<int> card_dist(0, std::max(0, card_num - 1));
-            for (auto& g : indiv) if (prob(rng) < 0.15) g.second = card_dist(rng);
+            // 局部 EFT 精修代替大量随机卡重分配，降开销增质量
+            indiv = RefineCardsByEFT(indiv, id2node, card_num, 0.15, rng);
         }
         return changed;
     };
