@@ -3,6 +3,7 @@
 #include <limits>
 #include <algorithm>
 #include <tuple>
+#include <queue>
 
 std::vector<std::pair<int,int>> TopoByPriority(
     const std::unordered_map<int,int>& indeg0,
