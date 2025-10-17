@@ -52,12 +52,15 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
 
     // 拓扑排序与卡分配改为调用独立实现
 
+    // 复用转换缓冲，避免每次评估都分配新向量
+    std::vector<std::pair<size_t,size_t>> order_buf;
+    order_buf.reserve(node_ids.size());
     auto evaluate = [&](const std::vector<std::pair<int,int>>& orderInt) {
-        // 转换为 size_t 类型以与 CalcTotalDuration 对齐
-        std::vector<std::pair<size_t,size_t>> order;
-        order.reserve(orderInt.size());
-        for (const auto& p : orderInt) order.emplace_back(static_cast<size_t>(p.first), static_cast<size_t>(p.second));
-        return CalcTotalDuration(order, all_nodes, static_cast<size_t>(card_num));
+        order_buf.resize(orderInt.size());
+        for (size_t i = 0; i < orderInt.size(); ++i) {
+            order_buf[i] = { static_cast<size_t>(orderInt[i].first), static_cast<size_t>(orderInt[i].second) };
+        }
+        return CalcTotalDuration(order_buf, all_nodes, static_cast<size_t>(card_num));
     };
 
     // GA 参数来自配置（不再使用轮次，仅保留时间退出）
@@ -158,9 +161,18 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             next.push_back(std::move(child));
         }
 
-        // 计算子代适应度并更新当前种群与历史最优
+        // 计算子代适应度并更新当前种群与历史最优（复用精英适应度）
         std::vector<long long> fitness_next(next.size());
-        for (size_t i = 0; i < next.size(); ++i) {
+        size_t elite_count = 0;
+        if (!idx.empty()) {
+            fitness_next[0] = fitness[idx[0]];
+            elite_count = 1;
+            if (pop_size > 1 && idx.size() >= 2 && next.size() >= 2) {
+                fitness_next[1] = fitness[idx[1]];
+                elite_count = 2;
+            }
+        }
+        for (size_t i = elite_count; i < next.size(); ++i) {
             fitness_next[i] = evaluate(next[i]);
         }
         population = std::move(next);
