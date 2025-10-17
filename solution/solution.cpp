@@ -41,8 +41,8 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
 
     if (node_ids.empty()) return {};
 
-    // 加载配置并初始化随机源
-    GAConfig cfg = LoadGAConfig("ga_config.txt");
+    // 使用内置默认配置，不读取本地文件
+    GAConfig cfg;
     std::mt19937 rng(static_cast<unsigned int>(
         (cfg.seed >= 0) ? cfg.seed : std::chrono::high_resolution_clock::now().time_since_epoch().count()));
 
@@ -98,7 +98,7 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         long long winner_fit = fit[winner];
         for (int i = 1; i < tournament_k; ++i) {
             int cand = idx_dist(rng);
-            if (fit[cand] < winner_fit) { winner = cand; winner_fit = fit[cand]; }
+            if (fit[cand] < winner_fit) { winner = cand; winner_fit = fit[winner]; }
         }
         return winner;
     };
@@ -119,7 +119,7 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             int chosen = (coin(rng) == 0) ? inherit_cards[nid] : B[i].second;
             inherit_cards[nid] = chosen;
         }
-        return TopoByPriority(indeg0, adj, card_num, rng, prio, &inherit_cards);
+        return TopoByPriorityWithEFT(indeg0, adj, id2node, card_num, rng, prio, &inherit_cards);
     };
 
     auto mutate = [&](std::vector<std::pair<int,int>>& indiv) -> bool {
@@ -133,7 +133,7 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             for (size_t i = 0; i < indiv.size(); ++i) prio[indiv[i].first] = static_cast<double>(i) + prio_noise(rng) * 0.5;
             std::unordered_map<int,int> inherit_cards;
             for (const auto& p : indiv) inherit_cards[p.first] = p.second;
-            indiv = TopoByPriority(indeg0, adj, card_num, rng, prio, &inherit_cards);
+            indiv = TopoByPriorityWithEFT(indeg0, adj, id2node, card_num, rng, prio, &inherit_cards);
             // 随机挑选若干节点重新分配卡
             std::uniform_int_distribution<int> card_dist(0, std::max(0, card_num - 1));
             for (auto& g : indiv) if (prob(rng) < 0.15) g.second = card_dist(rng);

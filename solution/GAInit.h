@@ -15,6 +15,17 @@ std::vector<std::pair<int,int>> TopoByPriority(
     const std::unordered_map<int,double>& priority,
     const std::unordered_map<int,int>* inherit_cards);
 
+// 基于优先级的拓扑排序 + EFT 卡分配（贪心最早完成）
+// 选择顺序由 priority 决定；卡分配对每个已选节点在所有卡上评估结束时间，选最小者
+std::vector<std::pair<int,int>> TopoByPriorityWithEFT(
+    const std::unordered_map<int,int>& indeg0,
+    const std::unordered_map<int,std::vector<int>>& adj,
+    const std::unordered_map<int, const Node*>& id2node,
+    int card_num,
+    std::mt19937& rng,
+    const std::unordered_map<int,double>& priority,
+    const std::unordered_map<int,int>* inherit_cards);
+
 // 初始种群生成：随机优先级 + 拓扑排序 + 随机卡分配
 std::vector<std::vector<std::pair<int,int>>> InitializePopulation(
     const std::vector<int>& node_ids,
