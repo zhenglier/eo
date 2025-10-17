@@ -59,9 +59,8 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         return CalcTotalDuration(order, all_nodes, static_cast<size_t>(card_num));
     };
 
-    // GA 参数来自配置
+    // GA 参数来自配置（不再使用轮次，仅保留时间退出）
     const int pop_size = cfg.pop_size;
-    const int generations = cfg.generations;
     const double mutation_rate = cfg.mutation_rate;
     const int tournament_k = cfg.tournament_k;
 
@@ -123,8 +122,8 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         }
     };
 
-    // 进化
-    for (int gen = 0; gen < generations; ++gen) {
+    // 进化（仅按时间终止）
+    while (true) {
         double elapsed_sec = std::chrono::duration<double>(
             std::chrono::high_resolution_clock::now() - t_start).count();
         if (elapsed_sec >= time_budget_seconds) break;
