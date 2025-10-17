@@ -6,6 +6,7 @@
 #include <random>
 #include <chrono>
 #include <string>
+#include <numeric>
 #include "GAConfig.h"
 #include "GAInit.h"
 
@@ -68,23 +69,26 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
     auto population = InitializePopulation(node_ids, indeg0, adj, id2node, card_num, pop_size, rng);
     if (population.empty()) return {};
 
-    auto cmp_fit = [&](const std::vector<std::pair<int,int>>& a,
-                       const std::vector<std::pair<int,int>>& b) {
-        return evaluate(a) < evaluate(b);
-    };
+    // 适应度缓存：减少对 CalcTotalDuration 的重复调用
+    std::vector<long long> fitness(population.size());
+    for (size_t i = 0; i < population.size(); ++i) {
+        fitness[i] = evaluate(population[i]);
+    }
+    int best_idx = static_cast<int>(std::min_element(fitness.begin(), fitness.end()) - fitness.begin());
+    auto best = population[best_idx];
+    long long best_fit = fitness[best_idx];
 
-    auto best = *std::min_element(population.begin(), population.end(), cmp_fit);
-
-    auto tournament_select = [&](const std::vector<std::vector<std::pair<int,int>>>& pop) {
+    // 锦标赛选择返回索引，使用缓存适应度比较
+    auto tournament_select_idx = [&](const std::vector<std::vector<std::pair<int,int>>>& pop,
+                                     const std::vector<long long>& fit) {
         std::uniform_int_distribution<int> idx_dist(0, static_cast<int>(pop.size()) - 1);
-        std::vector<std::pair<std::vector<std::pair<int,int>>, double>> bucket;
-        bucket.reserve(tournament_k);
-        for (int i = 0; i < tournament_k; ++i) {
-            const auto& cand = pop[idx_dist(rng)];
-            bucket.emplace_back(cand, evaluate(cand));
+        int winner = idx_dist(rng);
+        long long winner_fit = fit[winner];
+        for (int i = 1; i < tournament_k; ++i) {
+            int cand = idx_dist(rng);
+            if (fit[cand] < winner_fit) { winner = cand; winner_fit = fit[cand]; }
         }
-        return std::min_element(bucket.begin(), bucket.end(),
-                                [](auto& x, auto& y){ return x.second < y.second; })->first;
+        return winner;
     };
 
     auto crossover = [&](const std::vector<std::pair<int,int>>& A,
@@ -131,23 +135,41 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         std::vector<std::vector<std::pair<int,int>>> next;
         next.reserve(pop_size);
 
-        // 精英保留
-        std::sort(population.begin(), population.end(), cmp_fit);
-        next.push_back(population[0]);
-        if (pop_size > 1) next.push_back(population[1]);
+        // 精英保留（基于适应度缓存，避免全排序）
+        std::vector<int> idx(population.size());
+        std::iota(idx.begin(), idx.end(), 0);
+        auto compIdx = [&](int a, int b){ return fitness[a] < fitness[b]; };
+        if (!idx.empty()) {
+            if (idx.size() >= 2) {
+                std::nth_element(idx.begin(), idx.begin() + 2, idx.end(), compIdx);
+                next.push_back(population[idx[0]]);
+                if (pop_size > 1) next.push_back(population[idx[1]]);
+            } else {
+                next.push_back(population[idx[0]]);
+            }
+        }
 
         while (static_cast<int>(next.size()) < pop_size) {
-            auto parentA = tournament_select(population);
-            auto parentB = tournament_select(population);
-            auto child = crossover(parentA, parentB);
-            if (child.empty()) child = parentA; // 保护：若失败则继承父代
+            int parentA_idx = tournament_select_idx(population, fitness);
+            int parentB_idx = tournament_select_idx(population, fitness);
+            auto child = crossover(population[parentA_idx], population[parentB_idx]);
+            if (child.empty()) child = population[parentA_idx]; // 保护：若失败则继承父代
             mutate(child);
             next.push_back(std::move(child));
         }
 
+        // 计算子代适应度并更新当前种群与历史最优
+        std::vector<long long> fitness_next(next.size());
+        for (size_t i = 0; i < next.size(); ++i) {
+            fitness_next[i] = evaluate(next[i]);
+        }
         population = std::move(next);
-        auto cur_best = *std::min_element(population.begin(), population.end(), cmp_fit);
-        if (evaluate(cur_best) < evaluate(best)) best = std::move(cur_best);
+        fitness = std::move(fitness_next);
+        int cur_best_idx = static_cast<int>(std::min_element(fitness.begin(), fitness.end()) - fitness.begin());
+        if (fitness[cur_best_idx] < best_fit) {
+            best_fit = fitness[cur_best_idx];
+            best = population[cur_best_idx];
+        }
     }
 
     // 将最终 best 转换为 size_t 类型返回
