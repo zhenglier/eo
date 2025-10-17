@@ -11,6 +11,7 @@
 #include "GAInit.h"
 #include <thread>
 #include <future>
+#include <cmath>
 
 std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all_nodes, int card_num) {
     if (card_num <= 0) return {};
@@ -105,11 +106,12 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
 
     // 锦标赛选择返回索引，使用缓存适应度比较
     auto tournament_select_idx = [&](const std::vector<std::vector<std::pair<int,int>>>& pop,
-                                     const std::vector<long long>& fit) {
+                                 const std::vector<long long>& fit,
+                                 int tk) {
         std::uniform_int_distribution<int> idx_dist(0, static_cast<int>(pop.size()) - 1);
         int winner = idx_dist(rng);
         long long winner_fit = fit[winner];
-        for (int i = 1; i < tournament_k; ++i) {
+        for (int i = 1; i < tk; ++i) {
             int cand = idx_dist(rng);
             if (fit[cand] < winner_fit) { winner = cand; winner_fit = fit[cand]; }
         }
@@ -174,9 +176,22 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             }
         }
 
+        // 计算自适应锦标赛规模（基于适应度多样性 + 时间进度）
+        double sum = 0.0, sumsq = 0.0;
+        for (long long f : fitness) { double df = static_cast<double>(f); sum += df; sumsq += df * df; }
+        double mean = sum / static_cast<double>(fitness.size());
+        double var = std::max(0.0, sumsq / static_cast<double>(fitness.size()) - mean * mean);
+        double stddev = std::sqrt(var);
+        double cv = (mean > 0.0) ? (stddev / mean) : 0.0; // 变异系数
+        double progress = elapsed_sec / time_budget_seconds;
+        double cv_factor = (cv < 0.10 ? 1.5 : (cv > 0.25 ? 0.8 : 1.0));
+        double time_factor = (progress < 0.33 ? 0.8 : (progress > 0.66 ? 1.2 : 1.0));
+        int max_k = std::min(pop_size, 8);
+        int cur_k = std::max(2, std::min(max_k, static_cast<int>(std::round(tournament_k * cv_factor * time_factor))));
+
         while (static_cast<int>(next.size()) < pop_size) {
-            int parentA_idx = tournament_select_idx(population, fitness);
-            int parentB_idx = tournament_select_idx(population, fitness);
+            int parentA_idx = tournament_select_idx(population, fitness, cur_k);
+            int parentB_idx = tournament_select_idx(population, fitness, cur_k);
             auto child = crossover(population[parentA_idx], population[parentB_idx]);
             if (child.empty()) child = population[parentA_idx]; // 保护：若失败则继承父代
             mutate(child);
