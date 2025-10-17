@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <algorithm>
 
-double CalcTotalDuration(const std::vector<std::pair<size_t,size_t>>& order,
+int64 CalcTotalDuration(const std::vector<std::pair<size_t,size_t>>& order,
                          const std::vector<Node*>& all_nodes,
                          size_t card_num) {
     if (card_num <= 0) return 0.0;
