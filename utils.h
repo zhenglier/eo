@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <tuple>
 
 using int64 = long long;
 
@@ -75,6 +76,7 @@ int64 GetResult(size_t card_num, const std::vector<Node *> &nodes,
     return -1;
   }
   std::vector<int64> card_ready_time(card_num, 0);
+  std::vector<int64> inbound_ready_time(card_num, 0);
   // {op finish card, finish time}
   std::vector<std::pair<size_t, int64>> op_exec_info(total_size, {0, -1});
   for (const auto &order : order_list) {
@@ -98,11 +100,11 @@ int64 GetResult(size_t card_num, const std::vector<Node *> &nodes,
                 << std::endl;
       return -1;
     }
-    // Check input exec info
-    auto inputs = nodes[cur_op_id]->inputs();
-    auto start_time = card_ready_time[cur_card_id];
-    // {input finish time, input transfer time}
-    std::vector<std::pair<int64, int64>> input_record_times;
+    // Check inputs and schedule early inbound transfers
+    const auto &inputs = nodes[cur_op_id]->inputs();
+    int64 local_inputs_max_ft = 0;
+    std::vector<std::tuple<int64, int64, size_t>> cross_inputs;
+    cross_inputs.reserve(inputs.size());
     for (const auto &input : inputs) {
       auto input_id = input->id();
       auto input_finish_time = op_exec_info[input_id].second;
@@ -111,34 +113,31 @@ int64 GetResult(size_t card_num, const std::vector<Node *> &nodes,
                   << " , input id: " << input_id << std::endl;
         return -1;
       }
-
-      // Input execute finished, need transfer
-      if (op_exec_info[input_id].first != cur_card_id) {
-        input_record_times.push_back(
-            {input_finish_time, input->transfer_time()});
-        // Avoid repeated input
-        op_exec_info[input_id].first = cur_card_id;
+      if (op_exec_info[input_id].first == cur_card_id) {
+        local_inputs_max_ft = std::max(local_inputs_max_ft, input_finish_time);
+      } else {
+        cross_inputs.emplace_back(input_finish_time, input->transfer_time(), input_id);
       }
     }
-    if (!input_record_times.empty()) {
-      std::sort(input_record_times.begin(), input_record_times.end(),
-                [](auto &x, auto &y) { return x.first < y.first; });
-      for (auto input_record_time : input_record_times) {
-        start_time = std::max(start_time, input_record_time.first) +
-                     input_record_time.second;
-      }
+    std::sort(cross_inputs.begin(), cross_inputs.end(),
+              [](const std::tuple<int64,int64,size_t> &x, const std::tuple<int64,int64,size_t> &y){ return std::get<0>(x) < std::get<0>(y); });
+    int64 last_transfer_arrival = 0;
+    for (const auto &ci : cross_inputs) {
+      int64 start_transfer = std::max(std::get<0>(ci), inbound_ready_time[cur_card_id]);
+      int64 arrival = start_transfer + std::get<1>(ci);
+      inbound_ready_time[cur_card_id] = arrival;
+      last_transfer_arrival = arrival;
+      // Mark this input as present on the destination card to avoid duplicate transfers later
+      op_exec_info[std::get<2>(ci)].first = cur_card_id;
     }
-    for (const auto &input : inputs) {
-      auto input_id = input->id();
-      op_exec_info[input_id].second = start_time;
-    }
+    int64 start_time = std::max(card_ready_time[cur_card_id], std::max(local_inputs_max_ft, last_transfer_arrival));
     auto end = start_time + nodes[cur_op_id]->exec_time();
     op_exec_info[cur_op_id] = {cur_card_id, end};
     card_ready_time[cur_card_id] = end;
   }
 
   int64 execute_time = 0;
-  for (int card = 0; card < card_num; ++card) {
+  for (size_t card = 0; card < card_num; ++card) {
     execute_time = std::max(execute_time, card_ready_time[card]);
   }
   return execute_time;
