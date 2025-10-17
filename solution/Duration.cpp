@@ -3,19 +3,19 @@
 #include <unordered_map>
 #include <algorithm>
 
-double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
+double CalcTotalDuration(const std::vector<std::pair<size_t,size_t>>& order,
                          const std::vector<Node*>& all_nodes,
-                         int card_num) {
+                         size_t card_num) {
     if (card_num <= 0) return 0.0;
     if (order.empty()) return 0.0;
 
-    std::unordered_map<int, const Node*> id2node;
+    std::unordered_map<size_t, const Node*> id2node;
     id2node.reserve(all_nodes.size());
     for (const Node* n : all_nodes) {
         if (n) id2node[n->id()] = n;
     }
 
-    std::unordered_map<int, int> assigned_card;
+    std::unordered_map<size_t, size_t> assigned_card;
     assigned_card.reserve(order.size());
     for (const auto& p : order) {
         assigned_card[p.first] = p.second;
@@ -25,7 +25,7 @@ double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
     std::vector<double> card_avail(static_cast<size_t>(card_num), 0.0);
     // 入站迁移资源可用时间（每张卡同时只能接受一条迁移数据，串行）
     std::vector<double> inbound_avail(static_cast<size_t>(card_num), 0.0);
-    std::unordered_map<int, double> finish_time;
+    std::unordered_map<size_t, double> finish_time;
     finish_time.reserve(order.size());
 
     // 消费者侧调度：在消费者准备执行前，按前驱完成时间排序安排跨卡迁移
@@ -42,11 +42,11 @@ double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
         cross_inputs.reserve(n->inputs().size());
         for (const Node* pred : n->inputs()) {
             if (!pred) continue;
-            int pid = pred->id();
+            size_t pid = pred->id();
             double ft = 0.0;
             auto itF = finish_time.find(pid);
             if (itF != finish_time.end()) ft = itF->second;
-            int pc = card;
+            size_t pc = card;
             auto itC = assigned_card.find(pid);
             if (itC != assigned_card.end()) pc = itC->second;
             if (pc == card) {
