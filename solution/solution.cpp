@@ -45,6 +45,10 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
     std::mt19937 rng(static_cast<unsigned int>(
         (cfg.seed >= 0) ? cfg.seed : std::chrono::high_resolution_clock::now().time_since_epoch().count()));
 
+    // 时间预算：50,000 点 ≈ 1 分钟，按点数线性缩放
+    auto t_start = std::chrono::high_resolution_clock::now();
+    double time_budget_seconds = 60.0 * (static_cast<double>(node_ids.size()) / 50000.0);
+
     // 拓扑排序与卡分配改为调用独立实现
 
     auto evaluate = [&](const std::vector<std::pair<int,int>>& orderInt) {
@@ -121,6 +125,9 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
 
     // 进化
     for (int gen = 0; gen < generations; ++gen) {
+        double elapsed_sec = std::chrono::duration<double>(
+            std::chrono::high_resolution_clock::now() - t_start).count();
+        if (elapsed_sec >= time_budget_seconds) break;
         // 子代集合
         std::vector<std::vector<std::pair<int,int>>> next;
         next.reserve(pop_size);
