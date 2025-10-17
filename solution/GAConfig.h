@@ -11,6 +11,4 @@ struct GAConfig {
     int seed = -1; // <0 表示使用时间种子
 };
 
-GAConfig LoadGAConfig(const std::string& path);
-
 #endif // NPU_GACONFIG_H

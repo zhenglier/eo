@@ -2,8 +2,7 @@ enable_language(CXX)
 
 set(SRCS
     Duration.cpp
-    GAConfig.cpp
-    GAInit.cpp
+        GAInit.cpp
     solution.cpp
 )
 

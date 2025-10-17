@@ -10,10 +10,6 @@ int64 CalcTotalDuration(const std::vector<std::pair<size_t,size_t>>& order_list,
                          const std::vector<Node*>& nodes,
                          size_t card_num) {
     auto total_size = nodes.size();
-    if (card_num < 0) {
-        std::cerr << "Invalid card num: " << card_num << std::endl;
-        return -1;
-    }
     if (order_list.size() != total_size) {
         std::cerr << "Invalid order list size: " << order_list.size()
                   << " , need equal to: " << total_size << std::endl;

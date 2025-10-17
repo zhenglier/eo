@@ -1,11 +1,9 @@
 #include "solution.h"
 
 #include <unordered_map>
-#include <limits>
 #include <algorithm>
 #include <random>
 #include <chrono>
-#include <string>
 #include <numeric>
 #include "GAConfig.h"
 #include "GAInit.h"
