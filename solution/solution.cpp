@@ -89,6 +89,9 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
     int best_idx = static_cast<int>(std::min_element(fitness.begin(), fitness.end()) - fitness.begin());
     auto best = population[best_idx];
     long long best_fit = fitness[best_idx];
+    // 设定目标时间为初始贪心解的结束时间，并要求达到其 90%
+    long long target_time = fitness[0];
+    long long required_time = static_cast<long long>(target_time * 0.9);
 
     // 锦标赛选择返回索引，使用缓存适应度比较
     auto tournament_select_idx = [&](const std::vector<std::vector<std::pair<int,int>>>& pop,
@@ -146,6 +149,8 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         double elapsed_sec = std::chrono::duration<double>(
             std::chrono::high_resolution_clock::now() - t_start).count();
         if (elapsed_sec >= time_budget_seconds) break;
+        // 如果已满足目标阈值，提前结束
+        if (best_fit <= required_time) break;
         // 子代集合（复用缓冲）
         next.clear();
         fitness_next.clear();
@@ -198,6 +203,8 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             best_fit = fitness[cur_best_idx];
             best = population[cur_best_idx];
         }
+        // 满足目标阈值则提前结束
+        if (best_fit <= required_time) break;
     }
 
     // 将最终 best 转换为 size_t 类型返回
