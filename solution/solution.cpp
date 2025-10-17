@@ -52,7 +52,7 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         std::vector<std::pair<size_t,size_t>> order;
         order.reserve(orderInt.size());
         for (const auto& p : orderInt) order.emplace_back(static_cast<size_t>(p.first), static_cast<size_t>(p.second));
-        return CalcTotalDuration(order, all_nodes, card_num);
+        return CalcTotalDuration(order, all_nodes, static_cast<size_t>(card_num));
     };
 
     // GA 参数来自配置

@@ -5,7 +5,7 @@
 
 double CalcTotalDuration(const std::vector<std::pair<size_t,size_t>>& order,
                          const std::vector<Node*>& all_nodes,
-                         int card_num) {
+                         size_t card_num) {
     if (card_num <= 0) return 0.0;
     if (order.empty()) return 0.0;
 
@@ -22,9 +22,9 @@ double CalcTotalDuration(const std::vector<std::pair<size_t,size_t>>& order,
     }
 
     // 执行资源可用时间（每张卡上的算子执行串行）
-    std::vector<double> card_avail(static_cast<size_t>(card_num), 0.0);
+    std::vector<double> card_avail(card_num, 0.0);
     // 入站迁移资源可用时间（每张卡同时只能接受一条迁移数据，串行）
-    std::vector<double> inbound_avail(static_cast<size_t>(card_num), 0.0);
+    std::vector<double> inbound_avail(card_num, 0.0);
     std::unordered_map<size_t, double> finish_time;
     finish_time.reserve(order.size());
 

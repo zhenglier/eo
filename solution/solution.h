@@ -11,6 +11,6 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
 // 接口：根据给定的执行序列计算总时长（makespan）
 double CalcTotalDuration(const std::vector<std::pair<size_t,size_t>>& order,
                          const std::vector<Node*>& all_nodes,
-                         int card_num);
+                         size_t card_num);
 
 #endif // NPU_SOLUTION_H
