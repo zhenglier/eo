@@ -9,7 +9,7 @@
 #include "GAConfig.h"
 #include "GAInit.h"
 
-std::vector<std::pair<int,int>> ExecuteOrder(const std::vector<Node*>&& all_nodes, int card_num) {
+std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all_nodes, int card_num) {
     if (card_num <= 0) return {};
 
     // 建图：id 映射、入度与邻接
@@ -47,12 +47,12 @@ std::vector<std::pair<int,int>> ExecuteOrder(const std::vector<Node*>&& all_node
 
     // 拓扑排序与卡分配改为调用独立实现
 
-    auto evaluate = [&](const std::vector<std::pair<int,int>>& order) {
-        // 由于 all_nodes 是 const &&，这里复制到本地再传入 CalcTotalDuration
-        std::vector<Node*> nodes;
-        nodes.reserve(all_nodes.size());
-        for (const Node* n : all_nodes) if (n) nodes.push_back(const_cast<Node*>(n));
-        return CalcTotalDuration(order, nodes, card_num);
+    auto evaluate = [&](const std::vector<std::pair<int,int>>& orderInt) {
+        // 转换为 size_t 类型以与 CalcTotalDuration 对齐
+        std::vector<std::pair<size_t,size_t>> order;
+        order.reserve(orderInt.size());
+        for (const auto& p : orderInt) order.emplace_back(static_cast<size_t>(p.first), static_cast<size_t>(p.second));
+        return CalcTotalDuration(order, all_nodes, card_num);
     };
 
     // GA 参数来自配置
@@ -144,5 +144,9 @@ std::vector<std::pair<int,int>> ExecuteOrder(const std::vector<Node*>&& all_node
         if (evaluate(cur_best) < evaluate(best)) best = std::move(cur_best);
     }
 
-    return best;
+    // 将最终 best 转换为 size_t 类型返回
+    std::vector<std::pair<size_t,size_t>> result;
+    result.reserve(best.size());
+    for (const auto& p : best) result.emplace_back(static_cast<size_t>(p.first), static_cast<size_t>(p.second));
+    return result;
 }

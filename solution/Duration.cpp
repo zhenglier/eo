@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <algorithm>
 
-double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
+double CalcTotalDuration(const std::vector<std::pair<size_t,size_t>>& order,
                          const std::vector<Node*>& all_nodes,
                          int card_num) {
     if (card_num <= 0) return 0.0;
@@ -15,7 +15,7 @@ double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
         if (n) id2node[n->id()] = n;
     }
 
-    std::unordered_map<int, int> assigned_card;
+    std::unordered_map<size_t, size_t> assigned_card;
     assigned_card.reserve(order.size());
     for (const auto& p : order) {
         assigned_card[p.first] = p.second;
@@ -25,11 +25,13 @@ double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
     std::vector<double> card_avail(static_cast<size_t>(card_num), 0.0);
     // 入站迁移资源可用时间（每张卡同时只能接受一条迁移数据，串行）
     std::vector<double> inbound_avail(static_cast<size_t>(card_num), 0.0);
-    std::unordered_map<int, double> finish_time;
+    std::unordered_map<size_t, double> finish_time;
     finish_time.reserve(order.size());
 
-    for (const auto& [nid, card] : order) {
-        auto itNode = id2node.find(nid);
+    for (const auto& item : order) {
+        size_t nid = item.first;
+        size_t card = item.second;
+        auto itNode = id2node.find(static_cast<int>(nid));
         if (itNode == id2node.end()) continue;
         const Node* n = itNode->second;
 
@@ -41,9 +43,10 @@ double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
         std::vector<std::pair<double,double>> cross_inputs; // (producer_finish_time, transfer_time)
         cross_inputs.reserve(n->inputs().size());
         for (const Node* pred : n->inputs()) {
+            if (!pred) continue;
             double ft = 0.0;
-            int prod_card = card;
-            int in = pred ? pred->id() : -1;
+            size_t in = pred->id();
+            size_t prod_card = card;
             auto itFinish = finish_time.find(in);
             if (itFinish != finish_time.end()) {
                 ft = itFinish->second;
@@ -53,8 +56,7 @@ double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
             if (prod_card == card) {
                 local_inputs_max_ft = std::max(local_inputs_max_ft, ft);
             } else {
-                double transfer = 0.0;
-                transfer = pred ? pred->transfer_time() : 0.0;
+                double transfer = pred->transfer_time();
                 cross_inputs.emplace_back(ft, transfer);
             }
         }
@@ -70,10 +72,9 @@ double CalcTotalDuration(const std::vector<std::pair<int,int>>& order,
         }
         latest_input_arrival = std::max(local_inputs_max_ft, last_transfer_arrival);
 
-        double start = std::max(card_avail[card], latest_input_arrival);
+        double start = std::max(card_avail[static_cast<size_t>(card)], latest_input_arrival);
         double finish = start + n->exec_time();
-
-        card_avail[card] = finish;
+        card_avail[static_cast<size_t>(card)] = finish;
         finish_time[nid] = finish;
     }
 
