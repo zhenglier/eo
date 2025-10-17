@@ -34,6 +34,7 @@ public:
     std::cout << "Case file name: " << file_name_
               << " , get result time cost: " << cost_time
               << " , ops execution time cost: " << ans
+              << " , your time cost: "<< CalcTotalDuration(node_execute_order,all_nodes_,card_num_)
               << std::endl;
   }
 
