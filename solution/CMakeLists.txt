@@ -1,5 +1,18 @@
-file(GLOB SRCS "*.cpp")
+enable_language(CXX)
+
+set(SRCS
+    Duration.cpp
+    GAConfig.cpp
+    GAInit.cpp
+    solution.cpp
+)
+
+if(NOT SRCS)
+    message(FATAL_ERROR "No sources found for solution_lib in ${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
 add_library(solution_lib STATIC ${SRCS})
+set_target_properties(solution_lib PROPERTIES LINKER_LANGUAGE CXX)
 
 target_include_directories(solution_lib
     PUBLIC

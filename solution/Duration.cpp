@@ -1,4 +1,4 @@
-#include "Solution.h"
+#include "solution.h"
 
 #include <unordered_map>
 #include <algorithm>

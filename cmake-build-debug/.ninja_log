@@ -1,0 +1,6 @@
+# ninja log v5
+53	328	7823707165838315	solution/CMakeFiles/solution_lib.dir/Node.cpp.obj	96a504ebf132e744
+35	595	7823707168505222	solution/CMakeFiles/solution_lib.dir/GAConfig.cpp.obj	fb34e8a7d1a8502e
+18	816	7823707170677843	solution/CMakeFiles/solution_lib.dir/Duration.cpp.obj	3cda0f5c424270dc
+71	1110	7823707173643856	solution/CMakeFiles/solution_lib.dir/GAInit.cpp.obj	529a0918e73c8bbe
+91	1365	7823707176171103	solution/CMakeFiles/solution_lib.dir/solution.cpp.obj	75a21ffb4bddb74a
