@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <algorithm>
+#include <tuple>
 
 std::vector<std::pair<int,int>> TopoByPriority(
     const std::unordered_map<int,int>& indeg0,
@@ -57,7 +58,8 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
     const std::unordered_map<int,int>& indeg0,
     const std::unordered_map<int,std::vector<int>>& adj,
     const std::unordered_map<int, const Node*>& id2node,
-    int card_num)
+    int card_num,
+    std::mt19937& rng)
 {
     if (card_num <= 0) return {};
     // 计算最大 id 以便开数组（输入文件保证 id 连续递增）
@@ -83,6 +85,13 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
         int best_nid = ready[0];
         int best_card = 0;
         long long best_end = std::numeric_limits<long long>::max();
+        const double epsilon = 0.2; // 20% 概率在前 k 个候选中随机挑选
+        std::vector<std::tuple<long long,int,int>> candidates; // (end, nid, card)
+        candidates.reserve(ready.size() * std::max(1, card_num));
+        // 对完成时间加入与原值相关的相对随机扰动，增强探索
+        std::uniform_real_distribution<double> jitter(0.0, 1.0);
+        std::uniform_real_distribution<double> prob(0.0, 1.0);
+        const double noise_frac = 0.05; // 5% 幅度的相对噪声
 
         for (int nid : ready) {
             auto itN = id2node.find(nid);
@@ -119,14 +128,28 @@ static std::vector<std::pair<int,int>> BuildGreedyIndividual(
                 }
                 long long ready_at = std::max(start, std::max(local_max, inbound_avail));
                 long long end = ready_at + node->exec_time();
-                if (end < best_end || (end == best_end && (nid < best_nid || (nid == best_nid && c < best_card)))) {
-                    best_end = end;
-                    best_nid = nid;
-                    best_card = c;
-                }
+                long long noisy_end = end + static_cast<long long>(noise_frac * end * jitter(rng));
+                candidates.emplace_back(noisy_end, nid, c);
+                // 直接更新最优候选的逻辑已移除，改为在外层使用候选集排序 + epsilon 随机选择
             }
         }
-
+        
+        // 根据候选的带噪完成时间进行 epsilon-贪心选择
+        std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b){ return std::get<0>(a) < std::get<0>(b); });
+        int k = std::min(3, static_cast<int>(candidates.size()));
+        if (!candidates.empty()) {
+            int pick_index = 0;
+            if (prob(rng) < epsilon && k > 0) {
+                std::uniform_int_distribution<int> pick(0, k - 1);
+                pick_index = pick(rng);
+            } else {
+                pick_index = 0;
+            }
+            best_end = std::get<0>(candidates[pick_index]);
+            best_nid = std::get<1>(candidates[pick_index]);
+            best_card = std::get<2>(candidates[pick_index]);
+        }
+        
         // 提交 best_nid 在 best_card 的调度
         const Node* node = id2node.at(best_nid);
         long long inbound_avail = inbound_ready[best_card];
@@ -178,7 +201,7 @@ std::vector<std::vector<std::pair<int,int>>> InitializePopulation(
     population.reserve(pop_size);
 
     // 先加入一个贪心解，作为种群的强种子
-    auto greedy = BuildGreedyIndividual(indeg0, adj, id2node, card_num);
+    auto greedy = BuildGreedyIndividual(indeg0, adj, id2node, card_num, rng);
     if (!greedy.empty()) population.push_back(std::move(greedy));
 
     // 其余用启发式 + 随机噪声生成
