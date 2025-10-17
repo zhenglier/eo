@@ -67,6 +67,15 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
     const int pop_size = cfg.pop_size;
     const double mutation_rate = cfg.mutation_rate;
     const int tournament_k = cfg.tournament_k;
+    // 预分配下一代与适应度缓冲，减少每轮内部分配
+    std::vector<std::vector<std::pair<int,int>>> next;
+    next.reserve(pop_size);
+    std::vector<long long> fitness_next;
+    fitness_next.reserve(pop_size);
+    auto schedule_equal = [](const std::vector<std::pair<int,int>>& a,
+                             const std::vector<std::pair<int,int>>& b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin());
+    };
 
     // 初始种群从独立文件生成（启发式优先级 + 少量随机扰动）
     auto population = InitializePopulation(node_ids, indeg0, adj, id2node, card_num, pop_size, rng);
@@ -113,9 +122,11 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         return TopoByPriority(indeg0, adj, card_num, rng, prio, &inherit_cards);
     };
 
-    auto mutate = [&](std::vector<std::pair<int,int>>& indiv) {
+    auto mutate = [&](std::vector<std::pair<int,int>>& indiv) -> bool {
         std::uniform_real_distribution<double> prob(0.0, 1.0);
+        bool changed = false;
         if (prob(rng) < mutation_rate) {
+            changed = true;
             // 轻微调整优先级（通过位置噪声重建拓扑）和随机修改部分卡分配
             std::uniform_real_distribution<double> prio_noise(0.0, 1.0);
             std::unordered_map<int, double> prio;
@@ -127,6 +138,7 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             std::uniform_int_distribution<int> card_dist(0, std::max(0, card_num - 1));
             for (auto& g : indiv) if (prob(rng) < 0.15) g.second = card_dist(rng);
         }
+        return changed;
     };
 
     // 进化（仅按时间终止）
@@ -134,9 +146,9 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
         double elapsed_sec = std::chrono::duration<double>(
             std::chrono::high_resolution_clock::now() - t_start).count();
         if (elapsed_sec >= time_budget_seconds) break;
-        // 子代集合
-        std::vector<std::vector<std::pair<int,int>>> next;
-        next.reserve(pop_size);
+        // 子代集合（复用缓冲）
+        next.clear();
+        fitness_next.clear();
 
         // 精英保留（基于适应度缓存，避免全排序）
         std::vector<int> idx(population.size());
@@ -146,9 +158,14 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             if (idx.size() >= 2) {
                 std::nth_element(idx.begin(), idx.begin() + 2, idx.end(), compIdx);
                 next.push_back(population[idx[0]]);
-                if (pop_size > 1) next.push_back(population[idx[1]]);
+                fitness_next.push_back(fitness[idx[0]]);
+                if (pop_size > 1) {
+                    next.push_back(population[idx[1]]);
+                    fitness_next.push_back(fitness[idx[1]]);
+                }
             } else {
                 next.push_back(population[idx[0]]);
+                fitness_next.push_back(fitness[idx[0]]);
             }
         }
 
@@ -157,26 +174,25 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
             int parentB_idx = tournament_select_idx(population, fitness);
             auto child = crossover(population[parentA_idx], population[parentB_idx]);
             if (child.empty()) child = population[parentA_idx]; // 保护：若失败则继承父代
-            mutate(child);
+            bool changed = mutate(child);
+            long long child_fit;
+            if (!changed) {
+                if (schedule_equal(child, population[parentA_idx])) {
+                    child_fit = fitness[parentA_idx];
+                } else if (schedule_equal(child, population[parentB_idx])) {
+                    child_fit = fitness[parentB_idx];
+                } else {
+                    child_fit = evaluate(child);
+                }
+            } else {
+                child_fit = evaluate(child);
+            }
             next.push_back(std::move(child));
+            fitness_next.push_back(child_fit);
         }
 
-        // 计算子代适应度并更新当前种群与历史最优（复用精英适应度）
-        std::vector<long long> fitness_next(next.size());
-        size_t elite_count = 0;
-        if (!idx.empty()) {
-            fitness_next[0] = fitness[idx[0]];
-            elite_count = 1;
-            if (pop_size > 1 && idx.size() >= 2 && next.size() >= 2) {
-                fitness_next[1] = fitness[idx[1]];
-                elite_count = 2;
-            }
-        }
-        for (size_t i = elite_count; i < next.size(); ++i) {
-            fitness_next[i] = evaluate(next[i]);
-        }
-        population = std::move(next);
-        fitness = std::move(fitness_next);
+        population.swap(next);
+        fitness.swap(fitness_next);
         int cur_best_idx = static_cast<int>(std::min_element(fitness.begin(), fitness.end()) - fitness.begin());
         if (fitness[cur_best_idx] < best_fit) {
             best_fit = fitness[cur_best_idx];

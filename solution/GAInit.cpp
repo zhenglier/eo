@@ -14,36 +14,47 @@ std::vector<std::pair<int,int>> TopoByPriority(
 {
     // 拷贝入度
     std::unordered_map<int,int> indeg = indeg0;
-    std::vector<int> ready;
-    ready.reserve(indeg.size());
-    for (const auto& kv : indeg) if (kv.second == 0) ready.push_back(kv.first);
+    // 使用按优先级的最小堆选择就绪节点，避免每次线性扫描
+    using Key = std::pair<double,int>;
+    struct PrioCmp {
+        bool operator()(const Key& a, const Key& b) const {
+            if (a.first != b.first) return a.first > b.first; // 较小优先级先出堆
+            return a.second > b.second; // id 更小优先
+        }
+    };
+    std::priority_queue<Key, std::vector<Key>, PrioCmp> ready;
+    for (const auto& kv : indeg) {
+        if (kv.second == 0) {
+            double p = 0.0;
+            auto itp = priority.find(kv.first);
+            if (itp != priority.end()) p = itp->second;
+            ready.push({p, kv.first});
+        }
+    }
 
     std::vector<std::pair<int,int>> order;
     order.reserve(indeg.size());
     std::uniform_int_distribution<int> card_dist(0, std::max(0, card_num - 1));
 
     while (!ready.empty()) {
-        int chosen = ready[0];
-        double best_p = std::numeric_limits<double>::infinity();
-        for (int nid : ready) {
-            double p = priority.count(nid) ? priority.at(nid) : 0.0;
-            if (p < best_p || (p == best_p && nid < chosen)) { chosen = nid; best_p = p; }
-        }
+        auto cur = ready.top(); ready.pop();
+        int chosen = cur.second;
         int card = (inherit_cards && inherit_cards->count(chosen))
                     ? inherit_cards->at(chosen)
                     : card_dist(rng);
         order.emplace_back(chosen, card);
 
-        // 从 ready 移除
-        for (auto it = ready.begin(); it != ready.end(); ++it) {
-            if (*it == chosen) { ready.erase(it); break; }
-        }
-        // 更新后继入度
+        // 更新后继入度并将新的就绪节点入堆
         auto it = adj.find(chosen);
         if (it != adj.end()) {
             for (int succ : it->second) {
                 auto inIt = indeg.find(succ);
-                if (inIt != indeg.end() && --(inIt->second) == 0) ready.push_back(succ);
+                if (inIt != indeg.end() && --(inIt->second) == 0) {
+                    double p = 0.0;
+                    auto itp = priority.find(succ);
+                    if (itp != priority.end()) p = itp->second;
+                    ready.push({p, succ});
+                }
             }
         }
     }
