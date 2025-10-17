@@ -9,8 +9,6 @@
 #include <numeric>
 #include "GAConfig.h"
 #include "GAInit.h"
-#include <thread>
-#include <future>
 
 std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all_nodes, int card_num) {
     if (card_num <= 0) return {};
@@ -55,35 +53,14 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
     // 拓扑排序与卡分配改为调用独立实现
 
     // 复用转换缓冲，避免每次评估都分配新向量
-    // 并行安全的线程局部转换缓冲
-    auto evaluate = [&](const std::vector<std::pair<int,int>>& orderInt) -> long long {
-        thread_local std::vector<std::pair<size_t,size_t>> tl_order_buf;
-        tl_order_buf.resize(orderInt.size());
+    std::vector<std::pair<size_t,size_t>> order_buf;
+    order_buf.reserve(node_ids.size());
+    auto evaluate = [&](const std::vector<std::pair<int,int>>& orderInt) {
+        order_buf.resize(orderInt.size());
         for (size_t i = 0; i < orderInt.size(); ++i) {
-            tl_order_buf[i] = { static_cast<size_t>(orderInt[i].first), static_cast<size_t>(orderInt[i].second) };
+            order_buf[i] = { static_cast<size_t>(orderInt[i].first), static_cast<size_t>(orderInt[i].second) };
         }
-        return CalcTotalDuration(tl_order_buf, all_nodes, static_cast<size_t>(card_num));
-    };
-    
-    // 并行评估指定范围 [s, e) 的个体适应度
-    auto eval_range_parallel = [&](auto& container, std::vector<long long>& out_fit, size_t s, size_t e) {
-        if (e <= s) return;
-        unsigned int hc = std::thread::hardware_concurrency();
-        unsigned int workers = std::max(1u, std::min(hc ? hc : 4u, static_cast<unsigned int>(e - s)));
-        size_t chunk = (e - s + workers - 1) / workers;
-        std::vector<std::future<void>> futs;
-        futs.reserve(workers);
-        for (unsigned int w = 0; w < workers; ++w) {
-            size_t bs = s + w * chunk;
-            if (bs >= e) break;
-            size_t be = std::min(e, bs + chunk);
-            futs.emplace_back(std::async(std::launch::async, [&, bs, be]() {
-                for (size_t i = bs; i < be; ++i) {
-                    out_fit[i] = evaluate(container[i]);
-                }
-            }));
-        }
-        for (auto& f : futs) f.get();
+        return CalcTotalDuration(order_buf, all_nodes, static_cast<size_t>(card_num));
     };
 
     // GA 参数来自配置（不再使用轮次，仅保留时间退出）
@@ -97,8 +74,9 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
 
     // 适应度缓存：减少对 CalcTotalDuration 的重复调用
     std::vector<long long> fitness(population.size());
-    // 并行计算初始种群适应度
-    eval_range_parallel(population, fitness, 0, population.size());
+    for (size_t i = 0; i < population.size(); ++i) {
+        fitness[i] = evaluate(population[i]);
+    }
     int best_idx = static_cast<int>(std::min_element(fitness.begin(), fitness.end()) - fitness.begin());
     auto best = population[best_idx];
     long long best_fit = fitness[best_idx];
@@ -194,8 +172,9 @@ std::vector<std::pair<size_t,size_t>> ExecuteOrder(const std::vector<Node*>& all
                 elite_count = 2;
             }
         }
-        // 并行评估非精英子代
-        eval_range_parallel(next, fitness_next, elite_count, next.size());
+        for (size_t i = elite_count; i < next.size(); ++i) {
+            fitness_next[i] = evaluate(next[i]);
+        }
         population = std::move(next);
         fitness = std::move(fitness_next);
         int cur_best_idx = static_cast<int>(std::min_element(fitness.begin(), fitness.end()) - fitness.begin());
